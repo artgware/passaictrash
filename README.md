@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/26871444/README.md)
 # Passaic Debris Tracker
 
 A volunteer-run, rower-driven debris tracking site for the lower Passaic River

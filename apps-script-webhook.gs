@@ -33,6 +33,17 @@
 
 const SHEET_NAME = 'Reports';
 const PHOTO_FOLDER_NAME = 'Passaic Debris Photos';
+
+// ---- Contact form settings ----
+// Email address that receives submissions from the "Contact Us" button on the
+// main page. Change this if the treasurer's address ever rotates.
+const CONTACT_TO_EMAIL = 'treasurer@nereidbc.org';
+// Optional: CC the person who deployed the script so they can see every
+// message that comes through (comment out to disable).
+const CONTACT_BCC_OWNER = true;
+// Minimum seconds between messages from the same client (basic rate limit
+// above and beyond the client-side cooldown).
+const CONTACT_MIN_INTERVAL_SEC = 20;
 // ts        = when the debris was OBSERVED (rower-specified)
 // reported_at = when the Save button was actually pressed (audit trail)
 // photo_url   = public Drive link to optional photo attachment
@@ -155,11 +166,19 @@ function doGet(e) {
   }
 }
 
-/** POST → append one report row. Body must be JSON (as text/plain). */
+/** POST → either append a report row, or relay a contact-form message. */
 function doPost(e) {
   try {
+    const body = JSON.parse(e.postData.contents);
+
+    // Contact form messages come in with action="contact" — relay via email
+    // instead of writing to the Reports sheet.
+    if (body && body.action === 'contact') {
+      return handleContact_(body);
+    }
+
     const sheet = getOrCreateSheet_();
-    const report = JSON.parse(e.postData.contents);
+    const report = body;
 
     if (!report || !report.id || !report.zoneId) {
       return jsonOut_({ ok: false, error: 'Missing id or zoneId' });
@@ -209,6 +228,122 @@ function jsonOut_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Tiny HTML-escape for the message body. */
+function escapeHtml_(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Relay a contact-form submission via email. Body:
+ *    { action: 'contact', name, email, phone, message, page, userAgent, submittedAt }
+ *  Validates minimally, sends to CONTACT_TO_EMAIL (BCC's the script owner if
+ *  configured), and logs the submission to a "ContactLog" sheet so the club
+ *  has an audit trail even if an email is missed.
+ */
+function handleContact_(body) {
+  try {
+    const name    = String(body.name    || '').trim();
+    const email   = String(body.email   || '').trim();
+    const phone   = String(body.phone   || '').trim();
+    const message = String(body.message || '').trim();
+    const page    = String(body.page    || '').trim();
+    const ua      = String(body.userAgent  || '').trim();
+    const submittedAt = body.submittedAt
+      ? new Date(body.submittedAt)
+      : new Date();
+
+    // Basic validation (mirrors the client)
+    if (!name)    return jsonOut_({ ok: false, error: 'Missing name' });
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return jsonOut_({ ok: false, error: 'Invalid email' });
+    }
+    if (!message || message.length < 5) return jsonOut_({ ok: false, error: 'Message too short' });
+    if (message.length > 5000)           return jsonOut_({ ok: false, error: 'Message too long' });
+
+    // Simple rate limit using ScriptProperties keyed on email.
+    try {
+      const props = PropertiesService.getScriptProperties();
+      const k = 'contact:last:' + email.toLowerCase();
+      const lastStr = props.getProperty(k);
+      if (lastStr) {
+        const last = parseInt(lastStr, 10);
+        if (!isNaN(last) && (Date.now() - last) < CONTACT_MIN_INTERVAL_SEC * 1000) {
+          return jsonOut_({ ok: false, error: 'Rate limit — please wait a moment before resending.' });
+        }
+      }
+      props.setProperty(k, String(Date.now()));
+    } catch (e) { /* non-fatal */ }
+
+    const subject = '[passaictrash.com] Contact from ' + name;
+
+    const textBody =
+      'A new message came in from the Passaic Debris Tracker contact form.\n\n' +
+      'Name:   ' + name  + '\n' +
+      'Email:  ' + email + '\n' +
+      'Phone:  ' + (phone || '(not provided)') + '\n' +
+      'When:   ' + submittedAt.toLocaleString() + '\n' +
+      (page ? 'Page:   ' + page + '\n' : '') +
+      (ua   ? 'Device: ' + ua   + '\n' : '') +
+      '\n----- Message -----\n' +
+      message + '\n';
+
+    const htmlBody =
+      '<div style="font-family:system-ui,sans-serif;max-width:640px;">' +
+        '<h2 style="color:#123a5a;margin:0 0 12px 0;">New message from passaictrash.com</h2>' +
+        '<table style="border-collapse:collapse;font-size:14px;">' +
+          '<tr><td style="color:#667;padding:4px 10px 4px 0;">Name</td><td><b>'  + escapeHtml_(name)  + '</b></td></tr>' +
+          '<tr><td style="color:#667;padding:4px 10px 4px 0;">Email</td><td><a href="mailto:' + escapeHtml_(email) + '">' + escapeHtml_(email) + '</a></td></tr>' +
+          '<tr><td style="color:#667;padding:4px 10px 4px 0;">Phone</td><td>' + escapeHtml_(phone || '(not provided)') + '</td></tr>' +
+          '<tr><td style="color:#667;padding:4px 10px 4px 0;">When</td><td>'  + escapeHtml_(submittedAt.toLocaleString()) + '</td></tr>' +
+          (page ? '<tr><td style="color:#667;padding:4px 10px 4px 0;">Page</td><td style="font-size:12px;color:#444;">' + escapeHtml_(page) + '</td></tr>' : '') +
+          (ua   ? '<tr><td style="color:#667;padding:4px 10px 4px 0;">Device</td><td style="font-size:12px;color:#666;">' + escapeHtml_(ua) + '</td></tr>' : '') +
+        '</table>' +
+        '<h3 style="margin:18px 0 6px 0;color:#123a5a;">Message</h3>' +
+        '<div style="white-space:pre-wrap;padding:12px 14px;background:#f5f7fb;border:1px solid #dce3ed;border-radius:6px;font-size:14px;line-height:1.5;">' +
+          escapeHtml_(message) +
+        '</div>' +
+        '<p style="color:#89a;font-size:12px;margin-top:16px;">' +
+          'Reply directly to this email to respond to ' + escapeHtml_(name) + '.' +
+        '</p>' +
+      '</div>';
+
+    const mailOpts = {
+      to: CONTACT_TO_EMAIL,
+      subject: subject,
+      replyTo: email,
+      name: 'Passaic Debris Tracker',
+      body: textBody,
+      htmlBody: htmlBody,
+    };
+    if (CONTACT_BCC_OWNER) {
+      try {
+        const owner = Session.getEffectiveUser().getEmail();
+        if (owner && owner !== CONTACT_TO_EMAIL) mailOpts.bcc = owner;
+      } catch (e) { /* Session may be unavailable in some execution contexts */ }
+    }
+
+    MailApp.sendEmail(mailOpts);
+
+    // Append to a ContactLog sheet for an audit trail (best-effort).
+    try {
+      const ss = SpreadsheetApp.getActive();
+      let log = ss.getSheetByName('ContactLog');
+      if (!log) {
+        log = ss.insertSheet('ContactLog');
+        log.appendRow(['reported_at', 'submitted_at', 'name', 'email', 'phone', 'message', 'page', 'user_agent']);
+        log.setFrozenRows(1);
+        log.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#123a5a').setFontColor('#ffffff');
+      }
+      log.appendRow([new Date().toISOString(), submittedAt.toISOString(), name, email, phone, message, page, ua]);
+    } catch (e) { /* non-fatal */ }
+
+    return jsonOut_({ ok: true, relayed: CONTACT_TO_EMAIL });
+  } catch (err) {
+    return jsonOut_({ ok: false, error: err.toString() });
+  }
 }
 
 /** Optional: run this once manually from the Apps Script editor to initialize. */

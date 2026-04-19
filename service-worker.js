@@ -6,7 +6,7 @@
  *   4. Background sync of queued debris reports when connection returns
  */
 
-const CACHE_VERSION = 'passaic-v3';
+const CACHE_VERSION = 'passaic-v4';
 const CORE_ASSETS = [
   '/',
   '/passaic-debris-tracker.html',
