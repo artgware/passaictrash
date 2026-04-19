@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Passaic River Debris Tracker — Wallington to Kearny</title>
+
+<!-- PWA metadata -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0f2540" />
+<meta name="description" content="Rower-driven debris tracking on the lower Passaic River between Wallington and Kearny, NJ." />
+
+<!-- iOS home-screen behavior -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Passaic Debris" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0e1621; color: #e6edf3; }
+
+  header {
+    background: linear-gradient(135deg, #0f2540 0%, #123a5a 100%);
+    color: white;
+    padding: 14px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #1e3a5f;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; letter-spacing: 0.2px; }
+  header .sub { font-size: 0.78rem; color: #9fc0e5; margin-top: 2px; }
+  header .actions { display: flex; gap: 8px; }
+  header button {
+    background: #1f4e7a;
+    color: white;
+    border: 1px solid #2c6aa0;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  header button:hover { background: #2c6aa0; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    height: calc(100vh - 64px - 230px);
+  }
+  .tide-chart-panel.collapsed + .layout {
+    height: calc(100vh - 64px - 44px);
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; height: auto; }
+  }
+
+  /* Tide chart strip across the top of the main page */
+  .tide-chart-panel {
+    background: #121a26;
+    border-bottom: 1px solid #1e2a3a;
+    padding: 8px 16px 10px 16px;
+    height: 230px;
+    box-sizing: border-box;
+    overflow: hidden;
+    transition: height 0.18s ease, padding 0.18s ease;
+    position: relative;
+  }
+  .tide-chart-panel.collapsed { height: 44px; padding-bottom: 6px; }
+  .tide-chart-panel.collapsed .tide-chart-body { display: none; }
+  .tide-chart-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .tide-chart-header h3 {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1.5px;
+    color: #7fa8d9; margin: 0; font-weight: 600;
+  }
+  .tide-chart-header h3 .status {
+    color: #cbd5e1; text-transform: none; letter-spacing: 0;
+    font-weight: 500; margin-left: 10px;
+  }
+  .tide-chart-toggle {
+    background: #1e2a3a; color: #cbd5e1; border: 1px solid #2c3e56;
+    border-radius: 4px; padding: 2px 10px; cursor: pointer; font-size: 0.85rem;
+    line-height: 1.1;
+  }
+  .tide-chart-toggle:hover { background: #243245; }
+  .tide-chart-body { height: calc(100% - 24px); display: flex; flex-direction: column; }
+  .tide-chart-canvas-wrap { position: relative; flex: 1; min-height: 0; }
+  .tide-chart-legend {
+    display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.7rem;
+    color: #8ea3bc; margin-top: 4px;
+  }
+  .tide-chart-legend .key { display: inline-flex; align-items: center; gap: 5px; }
+  .tide-chart-legend .swatch {
+    display: inline-block; width: 18px; height: 3px; border-radius: 1px;
+  }
+  .tide-chart-legend .swatch.dot {
+    width: 9px; height: 9px; border-radius: 50%;
+  }
+
+  @media (max-width: 900px) {
+    .tide-chart-panel { height: 200px; }
+    .tide-chart-panel.collapsed { height: 44px; }
+  }
+
+  #map { width: 100%; height: 100%; background: #0a1423; }
+
+  .sidebar {
+    background: #121a26;
+    border-left: 1px solid #1e2a3a;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .sidebar h2 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #7fa8d9;
+    margin: 0 0 10px 0;
+  }
+
+  .card {
+    background: #17212f;
+    border: 1px solid #22303f;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+  }
+
+  .zone-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 4px;
+    border-bottom: 1px solid #1c2735;
+    font-size: 0.88rem;
+  }
+  .zone-row:last-child { border-bottom: none; }
+  .zone-name { font-weight: 500; }
+  .zone-meta { color: #8ea3bc; font-size: 0.75rem; }
+
+  .level-badge {
+    display: inline-block;
+    min-width: 28px;
+    text-align: center;
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: white;
+    font-weight: 700;
+    font-size: 0.8rem;
+  }
+  .lvl-0 { background: #3b4a5e; }
+  .lvl-1 { background: #22a06b; }
+  .lvl-2 { background: #8cbd3f; }
+  .lvl-3 { background: #e8b317; color: #2b1f00; }
+  .lvl-4 { background: #e8732c; }
+  .lvl-5 { background: #d3362d; }
+
+  /* Lock page / map scroll while a modal is open so touch gestures don't
+     bubble to the Leaflet map behind. Applied via JS on modal open/close. */
+  html.modal-open, body.modal-open { overflow: hidden !important; height: 100%; }
+  body.modal-open #map { pointer-events: none; touch-action: none; }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 5000;
+    /* Block touch panning from bubbling through to the map behind */
+    overscroll-behavior: contain;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: #17212f;
+    border: 1px solid #2c3e56;
+    border-radius: 10px;
+    width: 92%;
+    max-width: 480px;
+    color: #e6edf3;
+    /* Cap height to the visible viewport (dvh accounts for the mobile URL bar)
+       and lay out title / scrollable body / sticky actions. */
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 24px);
+    overflow: hidden;
+    overscroll-behavior: contain;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  /* Fallback for browsers that don't support dvh */
+  @supports not (height: 100dvh) {
+    .modal { max-height: calc(100vh - 24px); }
+  }
+  /* Sections inside the modal replace the old single padding on .modal. */
+  .modal-head {
+    padding: 18px 22px 10px 22px;
+    border-bottom: 1px solid #22303f;
+    flex: 0 0 auto;
+  }
+  .modal-body {
+    padding: 10px 22px 14px 22px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    flex: 1 1 auto;
+    min-height: 0;
+    /* Allow vertical scroll gestures to stay inside the modal */
+    touch-action: pan-y;
+  }
+  .modal h3 { margin: 0 0 4px 0; font-size: 1.1rem; }
+  .modal .sub-info { color: #8ea3bc; font-size: 0.82rem; margin-bottom: 0; }
+  .level-picker {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .level-btn {
+    padding: 14px 0;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    color: white;
+    font-weight: 700;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+  }
+  .level-btn:hover { transform: translateY(-2px); }
+  .level-btn.selected { border-color: #fff; box-shadow: 0 0 0 2px #2c6aa0; }
+  .level-btn small { display: block; font-size: 0.65rem; font-weight: 500; opacity: 0.92; }
+
+  .modal label { display: block; font-size: 0.82rem; color: #9fc0e5; margin: 10px 0 4px; }
+  .modal input, .modal textarea, .modal select {
+    width: 100%;
+    background: #0e1621;
+    color: #e6edf3;
+    border: 1px solid #2c3e56;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    font-family: inherit;
+  }
+  .modal textarea { min-height: 58px; resize: vertical; }
+
+  .modal-actions {
+    margin-top: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+    padding: 12px 22px calc(14px + env(safe-area-inset-bottom, 0px)) 22px;
+    background: #17212f;
+    border-top: 1px solid #22303f;
+    /* Ensure the Save button is always reachable, even if the inner body is scrolled */
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+  }
+  .btn {
+    padding: 10px 16px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.92rem;
+    min-height: 44px; /* iOS minimum touch target */
+  }
+  .btn-primary { background: #2c6aa0; color: white; }
+  .btn-primary:hover { background: #3a7fbc; }
+  .btn-secondary { background: #2a3647; color: #cbd5e1; }
+  .btn-secondary:hover { background: #364459; }
+  .btn-danger { background: #8b2e2e; color: white; }
+
+  .legend {
+    background: rgba(15,25,40,0.94);
+    color: #e6edf3;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    border: 1px solid #2c3e56;
+    line-height: 1.6;
+  }
+  .legend .item { display: flex; align-items: center; gap: 8px; }
+  .legend .sw { width: 16px; height: 16px; border-radius: 3px; display: inline-block; }
+
+  table.reports {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  table.reports th, table.reports td {
+    text-align: left;
+    padding: 6px 4px;
+    border-bottom: 1px solid #22303f;
+  }
+  table.reports th { color: #7fa8d9; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; }
+  table.reports tr:hover td { background: #1b2636; }
+
+  .flow-panel .data-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px dashed #22303f;
+    font-size: 0.85rem;
+  }
+  .flow-panel .data-row:last-child { border: none; }
+  .flow-panel .lbl { color: #9fc0e5; }
+  .flow-panel .val { font-weight: 600; }
+
+  .chart-wrap { height: 180px; position: relative; }
+  canvas { max-width: 100%; }
+
+  .tabs { display: flex; gap: 2px; margin-bottom: 12px; background: #0e1621; border-radius: 6px; padding: 3px; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: #8ea3bc;
+  }
+  .tab.active { background: #1f4e7a; color: white; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .empty {
+    color: #6d7e92;
+    text-align: center;
+    font-size: 0.82rem;
+    padding: 14px 0;
+    font-style: italic;
+  }
+
+  .footnote {
+    font-size: 0.72rem;
+    color: #7b90aa;
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  .footnote a { color: #80b6ea; }
+
+  .pulse {
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .arrow-marker {
+    width: 0; height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 14px solid #4aa3ff;
+  }
+
+  /* Sync status pill */
+  #sync-status {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    margin-left: 4px;
+    background: #2a3647;
+    color: #cbd5e1;
+    vertical-align: middle;
+  }
+  #sync-status.synced { background: #1e5d3f; color: #b6f1c8; }
+  #sync-status.syncing { background: #3a4f70; color: #c8dcf6; }
+  #sync-status.error { background: #6b2828; color: #f6c8c8; }
+
+  /* Time-offset chips */
+  .time-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .time-chip {
+    background: #2a3647;
+    color: #cbd5e1;
+    border: 1px solid #3a4a5e;
+    border-radius: 14px;
+    padding: 5px 11px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .time-chip:hover { background: #364459; }
+  .time-chip.selected { background: #2c6aa0; color: white; border-color: #3a7fbc; }
+
+  .delay-badge {
+    display: inline-block;
+    background: #4a3a1f;
+    color: #ffd58a;
+    font-size: 0.68rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 5px;
+  }
+
+  /* iOS safe areas + mobile polish */
+  @supports (padding: max(0px)) {
+    header { padding-top: max(14px, env(safe-area-inset-top)); }
+    .sidebar { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  }
+  @media (max-width: 600px) {
+    header h1 { font-size: 1rem; }
+    header .sub { font-size: 0.72rem; }
+    header button { padding: 9px 11px; font-size: 0.78rem; }
+    .level-btn { padding: 18px 0; font-size: 1.15rem; } /* larger touch target */
+    .time-chip { padding: 7px 13px; font-size: 0.82rem; }
+    table.reports { font-size: 0.74rem; }
+
+    /* Bottom-sheet modal: full-width, docked to the bottom, Save always visible */
+    .modal-backdrop.open { align-items: flex-end; padding: 0; }
+    .modal {
+      width: 100%;
+      max-width: none;
+      border-radius: 14px 14px 0 0;
+      border-bottom: none;
+      max-height: 92dvh;
+    }
+    @supports not (height: 100dvh) {
+      .modal { max-height: 92vh; }
+    }
+    .modal-head  { padding: 14px 16px 8px 16px; }
+    .modal-body  { padding: 8px 16px 10px 16px; }
+    .modal-actions {
+      padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px)) 16px;
+    }
+    .modal-actions .btn { flex: 1; }     /* full-width Save / Cancel buttons */
+    .modal-actions .btn-primary { flex: 1.6; } /* prioritize Save */
+  }
+
+  /* Install / update prompt banner */
+  .app-banner {
+    position: fixed;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f4e7a;
+    color: white;
+    padding: 10px 14px;
+    border-radius: 28px;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    font-size: 0.85rem;
+    z-index: 4500;
+    border: 1px solid #2c6aa0;
+  }
+  .app-banner.show { display: flex; }
+  .app-banner button {
+    background: #4aa3ff;
+    color: #0f2540;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 16px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.82rem;
+  }
+  .app-banner .dismiss {
+    background: transparent;
+    color: #cbd5e1;
+    font-weight: normal;
+    font-size: 1.1rem;
+    padding: 0 6px;
+  }
+
+  /* Photo capture */
+  .photo-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .photo-btn {
+    padding: 9px 12px;
+    border-radius: 6px;
+    background: #2a3647;
+    color: #cbd5e1;
+    border: 1px solid #3a4a5e;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+  .photo-btn:hover { background: #364459; }
+  .photo-preview {
+    width: 58px; height: 58px;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid #2c3e56;
+    display: none;
+  }
+  .photo-preview.show { display: block; }
+  .photo-meta { font-size: 0.72rem; color: #9fc0e5; }
+
+  /* GPS zone hint */
+  .gps-hint {
+    background: #0e1621;
+    border: 1px solid #22303f;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    color: #9fc0e5;
+    margin-top: 4px;
+  }
+  .gps-hint.detected { color: #b6f1c8; border-color: #1e5d3f; background: #14291f; }
+
+  /* Settings modal extras */
+  .settings-help {
+    font-size: 0.78rem;
+    color: #9fc0e5;
+    line-height: 1.5;
+    background: #0e1621;
+    border: 1px solid #22303f;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-top: 8px;
+  }
+  .settings-help code {
+    background: #1c2735;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🚣 Passaic River Debris Tracker</h1>
+    <div class="sub">Wallington → Kearny, NJ · 6-Zone Rower Reporting System · <span id="sync-status">Local only</span></div>
+  </div>
+  <div class="actions">
+    <button id="btn-settings" style="display:none;" aria-hidden="true">⚙ Settings</button>
+    <button id="btn-sync">☁ Sync Now</button>
+    <button id="btn-refresh-env">🔄 Tide/Flow</button>
+    <button id="btn-export">⬇ Export CSV</button>
+    <button id="btn-clear" class="btn-danger">🗑 Clear Local</button>
+  </div>
+</header>
+
+<section id="tide-chart-panel" class="tide-chart-panel">
+  <div class="tide-chart-header">
+    <h3>Tide · Newark Bay (NOAA 8519483)<span class="status" id="tide-chart-status">loading predictions…</span></h3>
+    <button class="tide-chart-toggle" id="tide-chart-toggle" aria-expanded="true" title="Show / hide tide chart">▾</button>
+  </div>
+  <div class="tide-chart-body">
+    <div class="tide-chart-canvas-wrap"><canvas id="tideChart"></canvas></div>
+    <div class="tide-chart-legend">
+      <span class="key"><span class="swatch" style="background:#4aa3ff;"></span>Predicted height</span>
+      <span class="key"><span class="swatch" style="background:#22c55e;"></span>Observed (last 12 h)</span>
+      <span class="key"><span class="swatch dot" style="background:#e8b317;"></span>High / low tide</span>
+      <span class="key"><span class="swatch" style="background:#ff6b6b;"></span>Now</span>
+    </div>
+  </div>
+</section>
+
+<div class="layout">
+  <div id="map"></div>
+
+  <aside class="sidebar">
+    <div class="tabs">
+      <div class="tab active" data-tab="zones">Zones</div>
+      <div class="tab" data-tab="reports">Reports</div>
+      <div class="tab" data-tab="trends">Trends</div>
+      <div class="tab" data-tab="env">Tide/Flow</div>
+    </div>
+
+    <div class="tab-panel active" data-panel="zones">
+      <div class="card">
+        <h2>Zone Summary</h2>
+        <div id="zone-summary"></div>
+        <div class="footnote">Click any zone on the map to log debris. Scores shown are the rolling average of the last 10 reports for that zone.</div>
+      </div>
+
+      <div class="card">
+        <h2>Legend · Debris Scale</h2>
+        <div class="legend">
+          <div class="item"><span class="sw lvl-1"></span><b>1</b> &nbsp;Clean — no visible debris</div>
+          <div class="item"><span class="sw lvl-2"></span><b>2</b> &nbsp;Mostly clean — trace litter</div>
+          <div class="item"><span class="sw lvl-3"></span><b>3</b> &nbsp;Moderate — noticeable debris</div>
+          <div class="item"><span class="sw lvl-4"></span><b>4</b> &nbsp;Heavy — obstructive debris</div>
+          <div class="item"><span class="sw lvl-5"></span><b>5</b> &nbsp;Unsafe — do not row</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="reports">
+      <div class="card">
+        <h2>Recent Reports</h2>
+        <div id="reports-table-wrap"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="trends">
+      <div class="card">
+        <h2>Debris Level Over Time</h2>
+        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+        <div class="footnote">Each point is the average debris score across all reports submitted in that hour, overlaid with tide phase when available.</div>
+      </div>
+      <div class="card">
+        <h2>Zone Heat Index</h2>
+        <div id="heat-list"></div>
+        <div class="footnote">
+          Direction arrows on the map show the approximate drift of floating debris implied by the current river flow (downstream) and tide direction (ebb = downstream, flood = upstream).
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="env">
+      <div class="card flow-panel">
+        <h2>Tide — Bergen Point, NY (NOAA 8519483)</h2>
+        <div id="tide-data"><div class="empty">Loading tide data…</div></div>
+        <div class="footnote">
+          Nearest NOAA tide gauge for Newark Bay / Lower Passaic.
+          <a href="https://tidesandcurrents.noaa.gov/stationhome.html?id=8519483" target="_blank" rel="noopener">NOAA station page ↗</a>
+        </div>
+      </div>
+      <div class="card flow-panel">
+        <h2>River Flow — Passaic River at Little Falls (USGS 01389500)</h2>
+        <div id="flow-data"><div class="empty">Loading flow data…</div></div>
+        <div class="footnote">
+          Upstream USGS gauge capturing main freshwater flow entering the lower Passaic.
+          <a href="https://waterdata.usgs.gov/monitoring-location/01389500/" target="_blank" rel="noopener">USGS station page ↗</a>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Debris Origin Model (heuristic)</h2>
+        <div id="origin-model" class="footnote" style="font-size:0.82rem; color:#cbd5e1;"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- Report modal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+    <div class="modal-head">
+      <h3 id="modal-title">Report debris</h3>
+      <div class="sub-info" id="modal-sub"></div>
+    </div>
+
+    <div class="modal-body">
+      <label>Debris level</label>
+      <div class="level-picker" id="level-picker">
+        <button class="level-btn lvl-1" data-level="1">1<small>CLEAN</small></button>
+        <button class="level-btn lvl-2" data-level="2">2<small>TRACE</small></button>
+        <button class="level-btn lvl-3" data-level="3">3<small>MOD</small></button>
+        <button class="level-btn lvl-4" data-level="4">4<small>HEAVY</small></button>
+        <button class="level-btn lvl-5" data-level="5">5<small>UNSAFE</small></button>
+      </div>
+
+      <label>When did you observe this debris?</label>
+      <input type="datetime-local" id="observed-at" />
+      <div class="time-chips" id="time-chips">
+        <button type="button" class="time-chip selected" data-offset="0">Now</button>
+        <button type="button" class="time-chip" data-offset="-15">−15 min</button>
+        <button type="button" class="time-chip" data-offset="-30">−30 min</button>
+        <button type="button" class="time-chip" data-offset="-60">−1 hr</button>
+        <button type="button" class="time-chip" data-offset="-120">−2 hr</button>
+        <button type="button" class="time-chip" data-offset="-180">−3 hr</button>
+      </div>
+      <div class="footnote" style="margin-top:6px;">
+        Defaults to right now. Adjust if you're logging after the row — the chart and zone heat
+        use the observed time, while we keep the actual report time for audit.
+      </div>
+
+      <label>Rower / Crew name (optional)</label>
+      <input type="text" id="rower-name" placeholder="e.g. Nereid Boat Club · Varsity 4+" />
+
+      <label>Dominant debris type</label>
+      <select id="debris-type">
+        <option value="mixed">Mixed / unspecified</option>
+        <option value="plastic">Plastic bottles / bags</option>
+        <option value="wood">Wood / logs / branches</option>
+        <option value="sewage">Sewage / oily sheen</option>
+        <option value="construction">Construction / tires</option>
+        <option value="vegetation">Vegetation mat</option>
+        <option value="dead_wildlife">Dead wildlife</option>
+        <option value="other">Other</option>
+      </select>
+
+      <label>Photo (optional)</label>
+      <div class="photo-row">
+        <input type="file" accept="image/*" capture="environment" id="photo-input" style="display:none;" />
+        <button type="button" class="photo-btn" id="photo-btn">📷 Add photo</button>
+        <img id="photo-preview" class="photo-preview" alt="Selected photo preview" />
+        <span id="photo-meta" class="photo-meta"></span>
+        <button type="button" class="photo-btn" id="photo-clear" style="display:none;">✕</button>
+      </div>
+
+      <label>Notes (optional)</label>
+      <textarea id="notes" placeholder="e.g. Large debris island ~50m long near west bank"></textarea>
+
+      <div class="gps-hint" id="gps-hint">Location: set by the zone you tapped.</div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-save">Save Report</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="modal-backdrop" id="settings-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Shared Backend Settings">
+    <div class="modal-head">
+      <h3>⚙ Shared Backend Settings</h3>
+      <div class="sub-info">Connect this site to a Google Sheet so every rower sees the same log.</div>
+    </div>
+
+    <div class="modal-body">
+      <label>Apps Script Web App URL</label>
+      <input type="text" id="webhook-url" readonly disabled
+             style="opacity:0.7; cursor:not-allowed;"
+             placeholder="https://script.google.com/macros/s/AKfyc.../exec" />
+
+      <div class="settings-help">
+        The backend URL is locked and managed by the site administrator.
+        Contact the club webmaster if a change is needed.
+      </div>
+
+      <label style="margin-top:14px;">
+        <input type="checkbox" id="auto-sync" style="width:auto; margin-right:6px;" />
+        Auto-pull latest reports every 60 seconds
+      </label>
+
+      <div id="settings-msg" style="font-size:0.8rem; margin-top:10px; min-height:1em;"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="settings-test">Test Connection</button>
+      <button class="btn btn-secondary" id="settings-cancel">Cancel</button>
+      <button class="btn btn-primary" id="settings-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- App banners (install + offline + update) -->
+<div class="app-banner" id="install-banner">
+  <span>📲 Install Passaic Debris as an app</span>
+  <button id="install-go">Install</button>
+  <button class="dismiss" id="install-dismiss">✕</button>
+</div>
+<div class="app-banner" id="ios-install-banner">
+  <span>📲 To install: tap <b>Share</b> → <b>Add to Home Screen</b></span>
+  <button class="dismiss" id="ios-install-dismiss">✕</button>
+</div>
+<div class="app-banner" id="update-banner">
+  <span>✨ A new version is ready</span>
+  <button id="update-go">Reload</button>
+  <button class="dismiss" id="update-dismiss">✕</button>
+</div>
+
+<!-- Libraries -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+/* ============================================================
+   ⚡ CLUB BACKEND — paste your Google Apps Script Web App URL
+   between the quotes below. This bakes the URL into the page
+   so every rower visiting passaictrash.com is auto-connected
+   to the shared Google Sheet — no Settings step required.
+
+   Leave empty ("") to fall back to the per-user Settings flow.
+   ============================================================ */
+const SHARED_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzU0nmhbOvA6kilrqfPA1aq_QEzCC0r-3gStTgy7GHnAifss---dE3PCciLgf7ZkPAF/exec";
+const FORCE_SHARED_URL = true;  // true = always use the baked URL, even if user changed it
+/* ============================================================ */
+
+/* -----------------------------------------------------------
+   1. ZONE DEFINITIONS (Passaic River, Wallington → Kearny)
+   ----------------------------------------------------------- */
+const ZONES = [
+  {
+    id: 1,
+    name: "Zone 1 · Wallington–Dundee",
+    desc: "Wallington north, above Dundee Dam to lake outflow.",
+    path: [
+      [40.8612, -74.1050],
+      [40.8575, -74.1062],
+      [40.8540, -74.1078],
+      [40.8500, -74.1100],
+      [40.8470, -74.1130],
+      [40.8450, -74.1165]
+    ]
+  },
+  {
+    id: 2,
+    name: "Zone 2 · Passaic–Clifton",
+    desc: "Below Dundee Dam through Passaic City waterfront.",
+    path: [
+      [40.8450, -74.1165],
+      [40.8420, -74.1200],
+      [40.8380, -74.1225],
+      [40.8320, -74.1245],
+      [40.8260, -74.1250]
+    ]
+  },
+  {
+    id: 3,
+    name: "Zone 3 · Nutley–Rutherford",
+    desc: "Nutley bend past Riverside County Park.",
+    path: [
+      [40.8260, -74.1250],
+      [40.8200, -74.1270],
+      [40.8140, -74.1290],
+      [40.8080, -74.1300],
+      [40.8030, -74.1305]
+    ]
+  },
+  {
+    id: 4,
+    name: "Zone 4 · Lyndhurst–Belleville",
+    desc: "Lyndhurst meanders through to Belleville.",
+    path: [
+      [40.8030, -74.1305],
+      [40.7970, -74.1320],
+      [40.7920, -74.1370],
+      [40.7870, -74.1430],
+      [40.7850, -74.1480]
+    ]
+  },
+  {
+    id: 5,
+    name: "Zone 5 · Belleville–North Arlington",
+    desc: "North Arlington bend to Kearny north bank.",
+    path: [
+      [40.7850, -74.1480],
+      [40.7800, -74.1490],
+      [40.7750, -74.1480],
+      [40.7700, -74.1470],
+      [40.7660, -74.1475]
+    ]
+  },
+  {
+    id: 6,
+    name: "Zone 6 · Kearny–Harrison",
+    desc: "Lower Passaic past Harrison, entering Newark Bay.",
+    path: [
+      [40.7660, -74.1475],
+      [40.7600, -74.1490],
+      [40.7540, -74.1520],
+      [40.7480, -74.1555],
+      [40.7440, -74.1585],
+      [40.7400, -74.1610]
+    ]
+  }
+];
+
+/* -----------------------------------------------------------
+   2. STATE / STORAGE
+   ----------------------------------------------------------- */
+const STORAGE_KEY = "passaic.debrisReports.v1";
+const WEBHOOK_KEY = "passaic.webhookUrl.v1";
+const AUTOSYNC_KEY = "passaic.autoSync.v1";
+const PENDING_KEY = "passaic.pendingPush.v1";
+
+function loadReports() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveReports(arr) { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); }
+let reports = loadReports();
+
+/* Bake-in bootstrap: if a club URL is hard-coded above, make it
+   the default for every visitor. When FORCE_SHARED_URL is true we
+   overwrite any previous user setting on every load, so if the
+   club rotates its backend we just redeploy this page. */
+if (SHARED_WEBHOOK_URL) {
+  const existing = (localStorage.getItem(WEBHOOK_KEY) || '').trim();
+  if (!existing || FORCE_SHARED_URL) {
+    localStorage.setItem(WEBHOOK_KEY, SHARED_WEBHOOK_URL);
+  }
+  // Default auto-sync ON for baked-in deployments so every visitor sees
+  // the latest club reports without touching Settings.
+  if (localStorage.getItem(AUTOSYNC_KEY) === null) {
+    localStorage.setItem(AUTOSYNC_KEY, '1');
+  }
+}
+
+/* Webhook + sync helpers */
+function getWebhookUrl() { return (localStorage.getItem(WEBHOOK_KEY) || '').trim(); }
+function setWebhookUrl(u) { localStorage.setItem(WEBHOOK_KEY, (u || '').trim()); }
+function getAutoSync() { return localStorage.getItem(AUTOSYNC_KEY) === '1'; }
+function setAutoSync(v) { localStorage.setItem(AUTOSYNC_KEY, v ? '1' : '0'); }
+function getPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY)) || []; } catch(e){ return []; } }
+function setPending(arr) { localStorage.setItem(PENDING_KEY, JSON.stringify(arr)); }
+
+function setSyncStatus(state, detail) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.classList.remove('synced', 'syncing', 'error');
+  const pending = getPending().length;
+  if (!getWebhookUrl()) { el.textContent = 'Local only'; return; }
+  if (state === 'syncing') { el.classList.add('syncing'); el.textContent = '☁ Syncing…'; }
+  else if (state === 'synced') { el.classList.add('synced'); el.textContent = pending ? `☁ Synced · ${pending} pending` : `☁ Synced${detail ? ' · ' + detail : ''}`; }
+  else if (state === 'error') { el.classList.add('error'); el.textContent = `⚠ Sync error${detail ? ': ' + detail : ''}`; }
+  else { el.textContent = 'Cloud'; }
+}
+
+async function pushReportToCloud(report, opts) {
+  opts = opts || {};
+  const url = getWebhookUrl();
+  if (!url) return { ok: false, reason: 'no-url' };
+  setSyncStatus('syncing');
+  try {
+    // text/plain avoids CORS preflight; Apps Script still reads e.postData.contents
+    const res = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify(report),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      redirect: 'follow'
+    });
+    let body = null;
+    try { body = await res.json(); } catch(e) { /* non-JSON redirect target — still ok */ }
+    // If the backend uploaded a photo, replace local heavy base64 with the Drive URL
+    if (body && body.photoUrl) {
+      const idx = reports.findIndex(r => r.id === report.id);
+      if (idx >= 0) {
+        reports[idx].photoUrl = body.photoUrl;
+        delete reports[idx].photoData;
+        saveReports(reports);
+        refreshAll();
+      }
+    }
+    setSyncStatus('synced');
+    return { ok: true, body };
+  } catch (err) {
+    // Queue it for later retry
+    const q = getPending();
+    if (!q.find(p => p.id === report.id)) q.push(report);
+    setPending(q);
+    setSyncStatus('error', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function flushPending() {
+  if (!getWebhookUrl()) return;
+  let q = getPending();
+  if (!q.length) return;
+  const remaining = [];
+  for (const r of q) {
+    const res = await pushReportToCloud(r, { silent: true });
+    if (!res.ok) remaining.push(r);
+  }
+  setPending(remaining);
+}
+
+async function pullReportsFromCloud() {
+  const url = getWebhookUrl();
+  if (!url) return;
+  setSyncStatus('syncing');
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data || !data.ok) throw new Error(data && data.error ? data.error : 'bad response');
+    // Merge by id, cloud wins
+    const byId = {};
+    reports.forEach(r => { byId[r.id] = r; });
+    (data.reports || []).forEach(r => {
+      // Normalize types from Sheets
+      if (r.level) r.level = parseInt(r.level);
+      if (r.zoneId) r.zoneId = parseInt(r.zoneId);
+      if (r.lat) r.lat = parseFloat(r.lat);
+      if (r.lng) r.lng = parseFloat(r.lng);
+      byId[r.id] = r;
+    });
+    reports = Object.values(byId).sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+    saveReports(reports);
+    refreshAll();
+    setSyncStatus('synced', `${data.count} reports`);
+  } catch (err) {
+    setSyncStatus('error', err.message);
+  }
+}
+
+/* -----------------------------------------------------------
+   3. MAP SETUP
+   ----------------------------------------------------------- */
+const map = L.map('map', { zoomControl: true }).setView([40.800, -74.132], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+// Place Wallington and Kearny markers
+L.marker([40.8534, -74.1071]).addTo(map).bindPopup("<b>Wallington</b><br>Upstream end of tracked section");
+L.marker([40.7684, -74.1454]).addTo(map).bindPopup("<b>Kearny</b><br>Downstream end of tracked section");
+
+// Draw zone polylines with click handlers
+const zoneLayers = {};
+function zoneColor(level) {
+  const colors = ['#4a5568', '#22a06b', '#8cbd3f', '#e8b317', '#e8732c', '#d3362d'];
+  return colors[Math.max(0, Math.min(5, Math.round(level)))];
+}
+function zoneAverage(zoneId) {
+  const zReports = reports.filter(r => r.zoneId === zoneId).slice(-10);
+  if (!zReports.length) return { avg: 0, count: reports.filter(r => r.zoneId === zoneId).length };
+  const avg = zReports.reduce((s, r) => s + r.level, 0) / zReports.length;
+  return { avg, count: reports.filter(r => r.zoneId === zoneId).length };
+}
+
+function drawZones() {
+  ZONES.forEach(z => {
+    if (zoneLayers[z.id]) { map.removeLayer(zoneLayers[z.id].line); map.removeLayer(zoneLayers[z.id].label); }
+    const stats = zoneAverage(z.id);
+    const color = stats.avg > 0 ? zoneColor(stats.avg) : '#4aa3ff';
+    const line = L.polyline(z.path, {
+      color: color,
+      weight: 9,
+      opacity: 0.85,
+      lineCap: 'round',
+      lineJoin: 'round'
+    }).addTo(map);
+    line.on('click', () => openReportModal(z));
+    line.on('mouseover', () => line.setStyle({ weight: 13, opacity: 1 }));
+    line.on('mouseout', () => line.setStyle({ weight: 9, opacity: 0.85 }));
+
+    // Mid-path label
+    const mid = z.path[Math.floor(z.path.length / 2)];
+    const labelHtml = `<div style="background:rgba(15,25,40,0.88);color:#fff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid ${color};white-space:nowrap;">
+      Z${z.id} · ${stats.avg ? stats.avg.toFixed(1) : '—'} <small style="opacity:0.7;">(${stats.count})</small>
+    </div>`;
+    const label = L.marker(mid, {
+      icon: L.divIcon({ html: labelHtml, className: '', iconSize: null })
+    }).addTo(map);
+    label.on('click', () => openReportModal(z));
+
+    zoneLayers[z.id] = { line, label };
+  });
+}
+drawZones();
+
+// Fit to river extent
+const allPoints = ZONES.flatMap(z => z.path);
+map.fitBounds(L.latLngBounds(allPoints).pad(0.15));
+
+/* -----------------------------------------------------------
+   4. REPORT MARKERS
+   ----------------------------------------------------------- */
+let reportMarkersGroup = L.layerGroup().addTo(map);
+function drawReportMarkers() {
+  reportMarkersGroup.clearLayers();
+  reports.forEach(r => {
+    if (!r.lat || !r.lng) return;
+    const color = zoneColor(r.level);
+    const marker = L.circleMarker([r.lat, r.lng], {
+      radius: 6 + r.level,
+      fillColor: color,
+      color: '#fff',
+      weight: 1.5,
+      fillOpacity: 0.85
+    }).addTo(reportMarkersGroup);
+    const when = new Date(r.ts).toLocaleString();
+    const photoHtml = (r.photoUrl || r.photoData)
+      ? `<a href="${r.photoUrl || r.photoData}" target="_blank"><img src="${r.photoUrl || r.photoData}" style="max-width:200px;max-height:160px;border-radius:4px;margin-top:4px;"/></a><br>`
+      : '';
+    marker.bindPopup(`
+      <b>Zone ${r.zoneId} · Level ${r.level}</b><br>
+      ${when}<br>
+      <i>${r.type || 'mixed'}</i><br>
+      ${r.rower ? `Rower: ${r.rower}<br>` : ''}
+      ${r.notes ? `Notes: ${r.notes}<br>` : ''}
+      ${photoHtml}
+    `);
+  });
+}
+drawReportMarkers();
+
+/* -----------------------------------------------------------
+   5. MODAL LOGIC
+   ----------------------------------------------------------- */
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modal-title');
+const modalSub = document.getElementById('modal-sub');
+let activeZone = null;
+let selectedLevel = null;
+let selectedLatLng = null;
+
+/* Format a Date as the 'YYYY-MM-DDTHH:mm' string a <input type=datetime-local> expects (local time) */
+function toLocalInputValue(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function applyTimeOffset(minutesAgo) {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + minutesAgo); // minutesAgo is negative for past
+  document.getElementById('observed-at').value = toLocalInputValue(d);
+}
+
+function openReportModal(zone, latlng) {
+  activeZone = zone;
+  selectedLatLng = latlng || zone.path[Math.floor(zone.path.length / 2)];
+  selectedLevel = null;
+  modalTitle.textContent = `Report debris — ${zone.name}`;
+  modalSub.textContent = zone.desc;
+  document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('rower-name').value = '';
+  document.getElementById('notes').value = '';
+  document.getElementById('debris-type').value = 'mixed';
+  // Default observed time = now, and reset chips so "Now" is highlighted
+  document.getElementById('observed-at').value = toLocalInputValue(new Date());
+  document.querySelectorAll('.time-chip').forEach(c => c.classList.remove('selected'));
+  const nowChip = document.querySelector('.time-chip[data-offset="0"]');
+  if (nowChip) nowChip.classList.add('selected');
+  modal.classList.add('open');
+  setBodyModalLock(true);
+  // Reset internal scroll position so users always start at the top of the form
+  const body = modal.querySelector('.modal-body');
+  if (body) body.scrollTop = 0;
+}
+function closeModal() {
+  modal.classList.remove('open');
+  if (!document.querySelector('.modal-backdrop.open')) setBodyModalLock(false);
+}
+
+/* Lock the page (and the Leaflet map) from scrolling while a modal is open.
+   Without this, touch-drag on iOS bubbles into Leaflet pan gestures and the
+   map slides around behind the modal. */
+function setBodyModalLock(on) {
+  document.documentElement.classList.toggle('modal-open', !!on);
+  document.body.classList.toggle('modal-open', !!on);
+}
+
+// Wire up the offset chips once
+document.querySelectorAll('.time-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.time-chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+    applyTimeOffset(parseInt(chip.dataset.offset));
+  });
+});
+// If the user edits the datetime field manually, clear chip selection
+document.getElementById('observed-at').addEventListener('input', () => {
+  document.querySelectorAll('.time-chip').forEach(c => c.classList.remove('selected'));
+});
+
+document.querySelectorAll('.level-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.level-btn').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    selectedLevel = parseInt(b.dataset.level);
+  });
+});
+
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-save').addEventListener('click', async () => {
+  if (!selectedLevel) { alert('Please choose a debris level (1–5).'); return; }
+  const now = new Date();
+  const latlng = Array.isArray(selectedLatLng) ? selectedLatLng : [selectedLatLng.lat, selectedLatLng.lng];
+
+  // Parse the rower-provided observation time
+  const observedInputRaw = document.getElementById('observed-at').value;
+  let observedDate = observedInputRaw ? new Date(observedInputRaw) : new Date();
+  if (isNaN(observedDate.getTime())) observedDate = new Date();
+  // Clamp: observations can't be in the future
+  if (observedDate.getTime() > now.getTime()) observedDate = now;
+  // Sanity: don't accept observations older than 48 hours — protects against typos
+  const maxAgeMs = 48 * 60 * 60 * 1000;
+  if (now.getTime() - observedDate.getTime() > maxAgeMs) {
+    if (!confirm('That observation time is more than 48 hours ago — is that right?')) return;
+  }
+
+  const report = {
+    id: 'r_' + Math.random().toString(36).slice(2) + Date.now().toString(36),
+    zoneId: activeZone.id,
+    zoneName: activeZone.name,
+    level: selectedLevel,
+    type: document.getElementById('debris-type').value,
+    rower: document.getElementById('rower-name').value.trim(),
+    notes: document.getElementById('notes').value.trim(),
+    lat: latlng[0],
+    lng: latlng[1],
+    ts: observedDate.toISOString(),      // when debris was actually seen on the water
+    reportedAt: now.toISOString(),       // when the Save button was pressed
+    tideSnapshot: latestTideSnapshot(),
+    flowSnapshot: latestFlowSnapshot()
+  };
+  reports.push(report);
+  saveReports(reports);
+  closeModal();
+  refreshAll();
+  // Push to shared cloud sheet (no-op if no webhook configured)
+  if (getWebhookUrl()) {
+    pushReportToCloud(report);
+  }
+});
+
+// Also allow clicking anywhere on a zone polyline to drop a point-located report
+map.on('click', (e) => {
+  // Find nearest zone within ~150 m
+  let bestZone = null;
+  let bestDist = Infinity;
+  ZONES.forEach(z => {
+    z.path.forEach(([la, lo]) => {
+      const d = map.distance([la, lo], e.latlng);
+      if (d < bestDist) { bestDist = d; bestZone = z; }
+    });
+  });
+  if (bestZone && bestDist < 200) {
+    openReportModal(bestZone, e.latlng);
+  }
+});
+
+/* -----------------------------------------------------------
+   6. SIDEBAR RENDERING
+   ----------------------------------------------------------- */
+function renderZoneSummary() {
+  const el = document.getElementById('zone-summary');
+  el.innerHTML = '';
+  ZONES.forEach(z => {
+    const s = zoneAverage(z.id);
+    const lvlClass = s.avg ? `lvl-${Math.round(s.avg)}` : 'lvl-0';
+    const lvlTxt = s.avg ? s.avg.toFixed(1) : '—';
+    el.insertAdjacentHTML('beforeend', `
+      <div class="zone-row">
+        <div>
+          <div class="zone-name">${z.name}</div>
+          <div class="zone-meta">${s.count} report${s.count === 1 ? '' : 's'}</div>
+        </div>
+        <span class="level-badge ${lvlClass}">${lvlTxt}</span>
+      </div>
+    `);
+  });
+}
+
+function formatDelay(observedTs, reportedTs) {
+  if (!observedTs || !reportedTs) return '';
+  const diffMs = new Date(reportedTs).getTime() - new Date(observedTs).getTime();
+  if (diffMs < 5 * 60 * 1000) return ''; // <5 min — treat as realtime
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `+${mins}m later`;
+  const hrs = Math.round(mins / 60 * 10) / 10;
+  return `+${hrs}h later`;
+}
+
+function renderReportsTable() {
+  const wrap = document.getElementById('reports-table-wrap');
+  if (!reports.length) { wrap.innerHTML = '<div class="empty">No reports yet. Tap a zone on the map to begin.</div>'; return; }
+  const recent = [...reports].sort((a, b) => (b.ts || '').localeCompare(a.ts || '')).slice(0, 60);
+  let html = '<table class="reports"><thead><tr><th>Observed</th><th>Zone</th><th>Lvl</th><th>Type</th><th>Rower</th></tr></thead><tbody>';
+  recent.forEach(r => {
+    const dt = new Date(r.ts);
+    const when = dt.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const delay = formatDelay(r.ts, r.reportedAt);
+    const delayHtml = delay ? `<span class="delay-badge" title="Logged ${delay}">${delay}</span>` : '';
+    html += `<tr>
+      <td>${when}${delayHtml}</td>
+      <td>Z${r.zoneId}</td>
+      <td><span class="level-badge lvl-${r.level}">${r.level}</span></td>
+      <td>${r.type || '—'}</td>
+      <td>${r.rower || '—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+/* -----------------------------------------------------------
+   7. TRENDS / CHART
+   ----------------------------------------------------------- */
+let trendChart = null;
+function renderTrendChart() {
+  const ctx = document.getElementById('trendChart');
+  if (!ctx) return;
+  // Group by hour-bucket
+  const buckets = {};
+  reports.forEach(r => {
+    const d = new Date(r.ts);
+    d.setMinutes(0, 0, 0);
+    const key = d.toISOString();
+    if (!buckets[key]) buckets[key] = [];
+    buckets[key].push(r.level);
+  });
+  const labels = Object.keys(buckets).sort();
+  const data = labels.map(k => buckets[k].reduce((s, v) => s + v, 0) / buckets[k].length);
+  const displayLabels = labels.map(l => {
+    const d = new Date(l);
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit' });
+  });
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: displayLabels,
+      datasets: [{
+        label: 'Avg debris level',
+        data,
+        borderColor: '#4aa3ff',
+        backgroundColor: 'rgba(74,163,255,0.15)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      scales: {
+        y: { min: 0, max: 5, ticks: { color: '#9fc0e5' }, grid: { color: '#22303f' } },
+        x: { ticks: { color: '#9fc0e5', maxTicksLimit: 6 }, grid: { color: '#22303f' } }
+      },
+      plugins: { legend: { labels: { color: '#e6edf3' } } }
+    }
+  });
+}
+
+function renderHeatList() {
+  const el = document.getElementById('heat-list');
+  const ranked = ZONES.map(z => ({ z, ...zoneAverage(z.id) })).sort((a, b) => b.avg - a.avg);
+  el.innerHTML = '';
+  ranked.forEach(r => {
+    const pct = r.avg ? (r.avg / 5) * 100 : 0;
+    const color = r.avg ? zoneColor(r.avg) : '#3b4a5e';
+    el.insertAdjacentHTML('beforeend', `
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:3px;">
+          <span>${r.z.name}</span>
+          <span>${r.avg ? r.avg.toFixed(2) : '—'} · ${r.count} rpt</span>
+        </div>
+        <div style="background:#0e1621;height:8px;border-radius:4px;overflow:hidden;">
+          <div style="background:${color};width:${pct}%;height:100%;"></div>
+        </div>
+      </div>
+    `);
+  });
+}
+
+/* -----------------------------------------------------------
+   8. TIDE / FLOW (NOAA + USGS)
+   ----------------------------------------------------------- */
+let tideData = null;
+let flowData = null;
+let tideChartInstance = null;
+let tideChartHilo = [];
+
+/* Format a Date as the NOAA datagetter expects: "yyyyMMdd HH:mm" in GMT */
+function noaaFmtGmt(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear()
+    + pad(d.getUTCMonth() + 1)
+    + pad(d.getUTCDate())
+    + ' '
+    + pad(d.getUTCHours())
+    + ':'
+    + pad(d.getUTCMinutes());
+}
+
+/* Parse "YYYY-MM-DD HH:mm" coming back from NOAA (we ask for GMT) into ms. */
+function parseNoaaGmt(str) {
+  const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!m) return NaN;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+}
+
+async function fetchTideChart() {
+  const station = '8519483';
+  const now = new Date();
+  const start = new Date(now.getTime() - 12 * 3600 * 1000);
+  const end = new Date(now.getTime() + 24 * 3600 * 1000);
+  const common = `application=passaic_tracker&datum=MLLW&station=${station}&time_zone=gmt&units=english&format=json`;
+  const enc = s => encodeURIComponent(s);
+  const predictedUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&interval=h&begin_date=${enc(noaaFmtGmt(start))}&end_date=${enc(noaaFmtGmt(end))}&${common}`;
+  const hiloUrl      = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&interval=hilo&begin_date=${enc(noaaFmtGmt(start))}&end_date=${enc(noaaFmtGmt(end))}&${common}`;
+  const actualUrl    = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=water_level&begin_date=${enc(noaaFmtGmt(start))}&end_date=${enc(noaaFmtGmt(now))}&${common}`;
+
+  try {
+    const [pRes, hRes, aRes] = await Promise.all([
+      fetch(predictedUrl).then(r => r.json()).catch(() => null),
+      fetch(hiloUrl     ).then(r => r.json()).catch(() => null),
+      fetch(actualUrl   ).then(r => r.json()).catch(() => null),
+    ]);
+    const predicted = (pRes && pRes.predictions) || [];
+    const hilo      = (hRes && hRes.predictions) || [];
+    const actual    = (aRes && aRes.data)        || [];
+    if (!predicted.length && !hilo.length && !actual.length) {
+      throw new Error('NOAA returned no usable data');
+    }
+    renderTideChart(predicted, hilo, actual, now);
+  } catch (err) {
+    const status = document.getElementById('tide-chart-status');
+    if (status) status.textContent = 'NOAA fetch unavailable (offline or CORS) — showing last known if any';
+  }
+}
+
+function renderTideChart(predicted, hilo, actual, now) {
+  const canvas = document.getElementById('tideChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const predictedPoints = predicted
+    .map(p => ({ x: parseNoaaGmt(p.t), y: parseFloat(p.v) }))
+    .filter(p => !isNaN(p.x) && !isNaN(p.y));
+  const actualPoints = actual
+    .map(p => ({ x: parseNoaaGmt(p.t), y: parseFloat(p.v) }))
+    .filter(p => !isNaN(p.x) && !isNaN(p.y));
+  const hiloPoints = hilo
+    .map(p => ({ x: parseNoaaGmt(p.t), y: parseFloat(p.v), type: p.type }))
+    .filter(p => !isNaN(p.x) && !isNaN(p.y));
+  tideChartHilo = hiloPoints; // for redraws
+
+  // Header status: next high/low and most recent observed reading
+  const status = document.getElementById('tide-chart-status');
+  const nowMs = now.getTime();
+  const nextHL = hiloPoints.find(p => p.x > nowMs);
+  let statusText = '';
+  if (nextHL) {
+    const dt = nextHL.x - nowMs;
+    const hrs = Math.floor(dt / 3600000);
+    const mins = Math.floor((dt % 3600000) / 60000);
+    const label = nextHL.type === 'H' ? 'High' : 'Low';
+    statusText = `Next ${label} ${hrs}h ${mins}m → ${nextHL.y.toFixed(1)} ft`;
+  }
+  const lastObs = actualPoints.length ? actualPoints[actualPoints.length - 1] : null;
+  if (lastObs) {
+    statusText += (statusText ? '  ·  ' : '')
+      + `Now ${lastObs.y.toFixed(1)} ft observed`;
+  }
+  if (status) status.textContent = statusText || 'tide chart loaded';
+
+  if (tideChartInstance) tideChartInstance.destroy();
+
+  const xMin = nowMs - 12 * 3600 * 1000;
+  const xMax = nowMs + 24 * 3600 * 1000;
+
+  tideChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Predicted',
+          data: predictedPoints,
+          borderColor: '#4aa3ff',
+          backgroundColor: 'rgba(74,163,255,0.14)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.35,
+          pointRadius: 0,
+          parsing: false,
+        },
+        {
+          label: 'Observed',
+          data: actualPoints,
+          borderColor: '#22c55e',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 0,
+          parsing: false,
+        },
+        {
+          label: 'High/Low',
+          data: hiloPoints,
+          backgroundColor: '#e8b317',
+          borderColor: '#e8b317',
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          showLine: false,
+          parsing: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0e1621',
+          borderColor: '#2c3e56',
+          borderWidth: 1,
+          callbacks: {
+            title: (items) => {
+              if (!items.length) return '';
+              const d = new Date(items[0].parsed.x);
+              return d.toLocaleString(undefined, {
+                weekday: 'short', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit'
+              });
+            },
+            label: (ctx) => {
+              const v = (ctx.parsed.y).toFixed(2);
+              if (ctx.dataset.label === 'High/Low') {
+                const hp = hiloPoints[ctx.dataIndex];
+                return `${hp && hp.type === 'H' ? 'High' : 'Low'} tide: ${v} ft`;
+              }
+              return `${ctx.dataset.label}: ${v} ft`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: xMin,
+          max: xMax,
+          ticks: {
+            color: '#8ea3bc',
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 12,
+            callback: (val) => {
+              const d = new Date(val);
+              const h = d.getHours();
+              const ampm = h >= 12 ? 'p' : 'a';
+              const hr = h % 12 || 12;
+              // Add a tiny date hint when we cross midnight
+              if (h === 0) {
+                return [hr + ampm, d.toLocaleDateString(undefined, { month:'short', day:'numeric' })];
+              }
+              return hr + ampm;
+            }
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' }
+        },
+        y: {
+          ticks: {
+            color: '#8ea3bc',
+            callback: (v) => v.toFixed(1) + ' ft'
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' }
+        }
+      }
+    },
+    plugins: [{
+      id: 'tideOverlays',
+      afterDatasetsDraw: (chart) => {
+        const { ctx, scales: { x: xScale, y: yScale } } = chart;
+        // Vertical "now" line
+        const xNow = xScale.getPixelForValue(nowMs);
+        if (xNow >= xScale.left && xNow <= xScale.right) {
+          ctx.save();
+          ctx.strokeStyle = '#ff6b6b';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(xNow, yScale.top);
+          ctx.lineTo(xNow, yScale.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#ff6b6b';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillText('NOW', xNow + 4, yScale.top + 11);
+          ctx.restore();
+        }
+        // Labels next to each high/low point
+        ctx.save();
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        tideChartHilo.forEach(hp => {
+          const xP = xScale.getPixelForValue(hp.x);
+          const yP = yScale.getPixelForValue(hp.y);
+          if (xP < xScale.left - 20 || xP > xScale.right + 20) return;
+          const label = `${hp.type === 'H' ? 'H' : 'L'} ${hp.y.toFixed(1)}ft`;
+          ctx.fillStyle = '#0e1621';
+          ctx.fillRect(xP - 22, hp.type === 'H' ? yP - 22 : yP + 8, 44, 14);
+          ctx.fillStyle = '#e8b317';
+          ctx.fillText(label, xP, hp.type === 'H' ? yP - 11 : yP + 19);
+        });
+        ctx.restore();
+      }
+    }]
+  });
+}
+
+async function fetchTide() {
+  // NOAA Station 8519483 - Bergen Point West Reach (Newark Bay)
+  const url = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?"
+    + "product=water_level&application=passaic_tracker&date=today"
+    + "&datum=MLLW&station=8519483&time_zone=lst_ldt&units=english&format=json";
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data || !data.data) throw new Error("no data");
+    tideData = data.data;
+    renderTide();
+  } catch (err) {
+    document.getElementById('tide-data').innerHTML =
+      '<div class="empty">Live NOAA fetch blocked (likely CORS). Click the station link below to open the live data in a new tab.</div>';
+  }
+}
+
+function renderTide() {
+  const el = document.getElementById('tide-data');
+  if (!tideData || !tideData.length) { el.innerHTML = '<div class="empty">No tide data.</div>'; return; }
+  const latest = tideData[tideData.length - 1];
+  const prev = tideData[tideData.length - 4] || tideData[0];
+  const rising = parseFloat(latest.v) > parseFloat(prev.v);
+  el.innerHTML = `
+    <div class="data-row"><span class="lbl">Latest reading</span><span class="val">${latest.t}</span></div>
+    <div class="data-row"><span class="lbl">Water level (MLLW)</span><span class="val">${latest.v} ft</span></div>
+    <div class="data-row"><span class="lbl">Tide phase</span><span class="val">${rising ? '🔺 Flood (rising)' : '🔻 Ebb (falling)'}</span></div>
+    <div class="data-row"><span class="lbl">Readings today</span><span class="val">${tideData.length}</span></div>
+  `;
+  updateOriginModel();
+}
+
+function latestTideSnapshot() {
+  if (!tideData || !tideData.length) return null;
+  const latest = tideData[tideData.length - 1];
+  const prev = tideData[Math.max(0, tideData.length - 4)];
+  return {
+    level: parseFloat(latest.v),
+    time: latest.t,
+    phase: parseFloat(latest.v) > parseFloat(prev.v) ? 'flood' : 'ebb'
+  };
+}
+
+async function fetchFlow() {
+  // USGS 01389500 Passaic at Little Falls - discharge (00060) and gauge height (00065)
+  const url = "https://waterservices.usgs.gov/nwis/iv/?format=json&sites=01389500&parameterCd=00060,00065&siteStatus=all";
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    flowData = data;
+    renderFlow();
+  } catch (err) {
+    document.getElementById('flow-data').innerHTML =
+      '<div class="empty">Live USGS fetch blocked (likely CORS). Click the station link below to open the live data in a new tab.</div>';
+  }
+}
+
+function renderFlow() {
+  const el = document.getElementById('flow-data');
+  if (!flowData || !flowData.value || !flowData.value.timeSeries) { el.innerHTML = '<div class="empty">No flow data.</div>'; return; }
+  const ts = flowData.value.timeSeries;
+  const discharge = ts.find(x => x.variable.variableCode[0].value === '00060');
+  const height = ts.find(x => x.variable.variableCode[0].value === '00065');
+  const dLast = discharge && discharge.values[0].value.slice(-1)[0];
+  const hLast = height && height.values[0].value.slice(-1)[0];
+  el.innerHTML = `
+    <div class="data-row"><span class="lbl">Discharge</span><span class="val">${dLast ? dLast.value + ' ft³/s' : 'n/a'}</span></div>
+    <div class="data-row"><span class="lbl">Gauge height</span><span class="val">${hLast ? hLast.value + ' ft' : 'n/a'}</span></div>
+    <div class="data-row"><span class="lbl">Reading time</span><span class="val">${dLast ? new Date(dLast.dateTime).toLocaleString() : ''}</span></div>
+  `;
+  updateOriginModel();
+}
+
+function latestFlowSnapshot() {
+  if (!flowData || !flowData.value || !flowData.value.timeSeries) return null;
+  const ts = flowData.value.timeSeries;
+  const discharge = ts.find(x => x.variable.variableCode[0].value === '00060');
+  const dLast = discharge && discharge.values[0].value.slice(-1)[0];
+  return dLast ? { discharge: parseFloat(dLast.value), time: dLast.dateTime } : null;
+}
+
+/* -----------------------------------------------------------
+   9. SIMPLE DEBRIS ORIGIN / MOVEMENT HEURISTIC
+   Drift direction = flow vector (downstream) modulated by
+   tide phase. On flood tide, tidal push can move floating
+   debris *upstream* in the tidal section of the lower Passaic
+   (roughly from Dundee Dam downstream).
+   ----------------------------------------------------------- */
+function updateOriginModel() {
+  const tide = latestTideSnapshot();
+  const flow = latestFlowSnapshot();
+  const el = document.getElementById('origin-model');
+  if (!tide && !flow) {
+    el.innerHTML = "Waiting on tide / flow data to compute drift direction.";
+    return;
+  }
+  let direction = "downstream (toward Kearny / Newark Bay)";
+  let reason = [];
+  if (flow && flow.discharge > 500) reason.push(`High freshwater discharge (${flow.discharge} ft³/s) — dominant downstream push`);
+  else if (flow) reason.push(`Moderate discharge (${flow.discharge} ft³/s)`);
+
+  if (tide) {
+    if (tide.phase === 'flood' && (!flow || flow.discharge < 400)) {
+      direction = "upstream (flood tide overrides weak freshwater flow — debris may drift from Newark Bay back toward Belleville/Nutley)";
+      reason.push(`Tide is flooding (${tide.level} ft) — expect reverse drift in tidal segment`);
+    } else if (tide.phase === 'ebb') {
+      reason.push(`Ebb tide reinforces downstream transport`);
+    } else {
+      reason.push(`Flood tide (${tide.level} ft)`);
+    }
+  }
+
+  el.innerHTML = `
+    <b>Estimated current drift:</b> ${direction}<br>
+    <b>Factors:</b><br>• ${reason.join('<br>• ')}
+    <br><br>
+    <b>Interpretation:</b> Debris first spotted in an <i>upper</i> zone (Z1–Z3) during ebb flow most likely originates from stormwater outfalls above Dundee Dam. Debris spotted in Z4–Z6 during a flood tide with low discharge may have entered from Newark Bay. Reports taken when freshwater discharge is high (&gt; 800 ft³/s) after rainfall strongly suggest upstream urban runoff as origin.
+  `;
+}
+
+/* -----------------------------------------------------------
+   10. UTILITIES
+   ----------------------------------------------------------- */
+function exportCSV() {
+  if (!reports.length) { alert('No reports to export.'); return; }
+  const headers = ['id','ts','reported_at','zoneId','zoneName','level','type','rower','notes','lat','lng','tide_level_ft','tide_phase','flow_cfs'];
+  const rows = reports.map(r => [
+    r.id, r.ts, r.reportedAt || '',
+    r.zoneId, `"${(r.zoneName || '').replace(/"/g, '""')}"`,
+    r.level, r.type || '', `"${(r.rower || '').replace(/"/g, '""')}"`,
+    `"${(r.notes || '').replace(/"/g, '""')}"`,
+    r.lat, r.lng,
+    r.tideSnapshot ? r.tideSnapshot.level : '',
+    r.tideSnapshot ? r.tideSnapshot.phase : '',
+    r.flowSnapshot ? r.flowSnapshot.discharge : ''
+  ].join(','));
+  const csv = headers.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'passaic_debris_reports.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function clearAll() {
+  if (!confirm('Delete ALL reports locally? This cannot be undone.')) return;
+  reports = [];
+  saveReports(reports);
+  refreshAll();
+}
+
+document.getElementById('btn-export').addEventListener('click', exportCSV);
+document.getElementById('btn-clear').addEventListener('click', clearAll);
+document.getElementById('btn-refresh-env').addEventListener('click', () => { fetchTide(); fetchFlow(); fetchTideChart(); });
+
+// Collapse / expand the tide chart strip
+(function () {
+  const panel = document.getElementById('tide-chart-panel');
+  const btn = document.getElementById('tide-chart-toggle');
+  if (!panel || !btn) return;
+  try {
+    const savedCollapsed = localStorage.getItem('passaic.tideChart.collapsed') === '1';
+    if (savedCollapsed) {
+      panel.classList.add('collapsed');
+      btn.textContent = '▸';
+      btn.setAttribute('aria-expanded', 'false');
+    }
+  } catch (e) { /* storage unavailable — fine */ }
+  btn.addEventListener('click', () => {
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.textContent = collapsed ? '▸' : '▾';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    try { localStorage.setItem('passaic.tideChart.collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    // Chart.js needs a resize nudge because the parent container dimensions changed
+    if (!collapsed && tideChartInstance) {
+      setTimeout(() => tideChartInstance.resize(), 200);
+    }
+  });
+  // Also resize on orientation / window resize
+  window.addEventListener('resize', () => {
+    if (tideChartInstance) tideChartInstance.resize();
+  });
+})();
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.querySelector(`.tab-panel[data-panel="${t.dataset.tab}"]`).classList.add('active');
+    if (t.dataset.tab === 'trends') renderTrendChart();
+  });
+});
+
+function refreshAll() {
+  drawZones();
+  drawReportMarkers();
+  renderZoneSummary();
+  renderReportsTable();
+  renderHeatList();
+  if (document.querySelector('.tab.active').dataset.tab === 'trends') renderTrendChart();
+  updateOriginModel();
+}
+
+/* -----------------------------------------------------------
+   11. SETTINGS / SYNC WIRING
+   ----------------------------------------------------------- */
+const settingsModal = document.getElementById('settings-modal');
+const webhookInput = document.getElementById('webhook-url');
+const autoSyncInput = document.getElementById('auto-sync');
+const settingsMsg = document.getElementById('settings-msg');
+
+function openSettings() {
+  setBodyModalLock(true);
+  webhookInput.value = getWebhookUrl();
+  autoSyncInput.checked = getAutoSync();
+  settingsMsg.textContent = '';
+  settingsModal.classList.add('open');
+}
+function closeSettings() {
+  settingsModal.classList.remove('open');
+  if (!document.querySelector('.modal-backdrop.open')) setBodyModalLock(false);
+}
+
+document.getElementById('btn-settings').addEventListener('click', openSettings);
+document.getElementById('settings-cancel').addEventListener('click', closeSettings);
+settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
+
+document.getElementById('settings-save').addEventListener('click', async () => {
+  setWebhookUrl(webhookInput.value);
+  setAutoSync(autoSyncInput.checked);
+  settingsMsg.style.color = '#9fc0e5';
+  settingsMsg.textContent = 'Saved. Pulling latest reports…';
+  applyAutoSync();
+  if (getWebhookUrl()) {
+    await flushPending();
+    await pullReportsFromCloud();
+    settingsMsg.style.color = '#b6f1c8';
+    settingsMsg.textContent = 'Connected to shared sheet.';
+  } else {
+    setSyncStatus();
+    settingsMsg.style.color = '#f6c8c8';
+    settingsMsg.textContent = 'Cleared backend URL. Running in local-only mode.';
+  }
+  setTimeout(closeSettings, 900);
+});
+
+document.getElementById('settings-test').addEventListener('click', async () => {
+  const u = webhookInput.value.trim();
+  if (!u) { settingsMsg.style.color='#f6c8c8'; settingsMsg.textContent = 'Please paste a URL first.'; return; }
+  settingsMsg.style.color = '#9fc0e5';
+  settingsMsg.textContent = 'Testing…';
+  try {
+    const res = await fetch(u);
+    const data = await res.json();
+    if (data && data.ok) {
+      settingsMsg.style.color = '#b6f1c8';
+      settingsMsg.textContent = `✓ Reached backend. ${data.count} reports in sheet.`;
+    } else {
+      settingsMsg.style.color = '#f6c8c8';
+      settingsMsg.textContent = `Backend returned error: ${data && data.error}`;
+    }
+  } catch (err) {
+    settingsMsg.style.color = '#f6c8c8';
+    settingsMsg.textContent = `Couldn't reach backend: ${err.message}`;
+  }
+});
+
+document.getElementById('btn-sync').addEventListener('click', async () => {
+  if (!getWebhookUrl()) { openSettings(); return; }
+  await flushPending();
+  await pullReportsFromCloud();
+});
+
+let autoSyncTimer = null;
+function applyAutoSync() {
+  if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+  if (getWebhookUrl() && getAutoSync()) {
+    autoSyncTimer = setInterval(() => { flushPending(); pullReportsFromCloud(); }, 60 * 1000);
+  }
+}
+
+/* -----------------------------------------------------------
+   12. BOOT
+   ----------------------------------------------------------- */
+refreshAll();
+fetchTide();
+fetchFlow();
+fetchTideChart();
+setInterval(() => { fetchTide(); fetchFlow(); fetchTideChart(); }, 10 * 60 * 1000); // refresh every 10 min
+
+setSyncStatus();
+if (getWebhookUrl()) {
+  // Pull shared data on startup so you see everyone else's reports
+  flushPending().then(pullReportsFromCloud);
+  applyAutoSync();
+}
+
+// Close modal on backdrop click
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+/* ===========================================================
+   PWA — service worker, install prompt, update prompt
+   =========================================================== */
+const PWA = {
+  installEvent: null,
+  installed: false
+};
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').then((reg) => {
+      // Detect updates
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            document.getElementById('update-banner').classList.add('show');
+          }
+        });
+      });
+    }).catch(() => { /* ignore: SW won't register on file:// */ });
+
+    // Receive flush-pending pings from the SW background sync
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'flush-pending') flushPending().then(pullReportsFromCloud);
+    });
+  });
+}
+
+// "Install" intercept (Android Chrome / Edge)
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  PWA.installEvent = e;
+  if (localStorage.getItem('passaic.install.dismissed') !== '1') {
+    document.getElementById('install-banner').classList.add('show');
+  }
+});
+window.addEventListener('appinstalled', () => {
+  PWA.installed = true;
+  document.getElementById('install-banner').classList.remove('show');
+});
+
+document.getElementById('install-go').addEventListener('click', async () => {
+  if (!PWA.installEvent) return;
+  PWA.installEvent.prompt();
+  await PWA.installEvent.userChoice;
+  PWA.installEvent = null;
+  document.getElementById('install-banner').classList.remove('show');
+});
+document.getElementById('install-dismiss').addEventListener('click', () => {
+  document.getElementById('install-banner').classList.remove('show');
+  localStorage.setItem('passaic.install.dismissed', '1');
+});
+
+// iOS doesn't fire beforeinstallprompt — show a helper banner instead
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isStandalone = window.navigator.standalone === true ||
+  window.matchMedia('(display-mode: standalone)').matches;
+if (isIOS && !isStandalone && localStorage.getItem('passaic.iosinstall.dismissed') !== '1') {
+  setTimeout(() => document.getElementById('ios-install-banner').classList.add('show'), 4000);
+}
+document.getElementById('ios-install-dismiss').addEventListener('click', () => {
+  document.getElementById('ios-install-banner').classList.remove('show');
+  localStorage.setItem('passaic.iosinstall.dismissed', '1');
+});
+
+document.getElementById('update-go').addEventListener('click', () => {
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+  }
+  setTimeout(() => location.reload(), 200);
+});
+document.getElementById('update-dismiss').addEventListener('click', () => {
+  document.getElementById('update-banner').classList.remove('show');
+});
+
+/* ===========================================================
+   GPS — auto-detect which zone the rower is in
+   =========================================================== */
+let lastGpsFix = null;
+
+function distancePointToSegment(p, a, b) {
+  // p, a, b = {lat, lng}; result in meters using equirectangular approximation
+  const toRad = d => d * Math.PI / 180;
+  const R = 6378137;
+  const proj = ll => ({
+    x: R * toRad(ll.lng) * Math.cos(toRad(p.lat)),
+    y: R * toRad(ll.lat)
+  });
+  const P = proj(p), A = proj(a), B = proj(b);
+  const dx = B.x - A.x, dy = B.y - A.y;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 ? ((P.x - A.x)*dx + (P.y - A.y)*dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = A.x + t*dx, cy = A.y + t*dy;
+  return Math.hypot(P.x - cx, P.y - cy);
+}
+
+function nearestZone(lat, lng) {
+  const p = { lat, lng };
+  let best = null;
+  let bestDist = Infinity;
+  ZONES.forEach(z => {
+    for (let i = 0; i < z.path.length - 1; i++) {
+      const a = { lat: z.path[i][0], lng: z.path[i][1] };
+      const b = { lat: z.path[i+1][0], lng: z.path[i+1][1] };
+      const d = distancePointToSegment(p, a, b);
+      if (d < bestDist) { bestDist = d; best = z; }
+    }
+  });
+  return { zone: best, distMeters: bestDist };
+}
+
+function requestGpsFix() {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        lastGpsFix = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, ts: Date.now() };
+        resolve(lastGpsFix);
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  });
+}
+
+async function maybeAutoOpenZoneFromGps() {
+  const fix = await requestGpsFix();
+  if (!fix) return;
+  const { zone, distMeters } = nearestZone(fix.lat, fix.lng);
+  // Only auto-suggest if the rower is within 800m of the river section
+  if (zone && distMeters < 800) {
+    openReportModal(zone, [fix.lat, fix.lng]);
+    showGpsHint(true, zone, distMeters);
+  }
+}
+
+function showGpsHint(detected, zone, distMeters) {
+  const el = document.getElementById('gps-hint');
+  if (!el) return;
+  if (detected && zone) {
+    el.classList.add('detected');
+    el.textContent = `📍 GPS placed you ~${Math.round(distMeters)}m from ${zone.name}`;
+  } else {
+    el.classList.remove('detected');
+    el.textContent = 'Location: set by the zone you tapped (turn on GPS for auto-zone)';
+  }
+}
+
+// Add a "Quick Report from my location" button to the actions row
+(function addQuickReportButton() {
+  const refreshBtn = document.getElementById('btn-refresh-env');
+  if (!refreshBtn) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-quick-report';
+  btn.textContent = '📍 Quick Report';
+  btn.title = 'Use GPS to auto-pick the zone you\u2019re currently in';
+  refreshBtn.parentNode.insertBefore(btn, refreshBtn);
+  btn.addEventListener('click', maybeAutoOpenZoneFromGps);
+})();
+
+// Honor the manifest shortcut /?quick=1 (Android long-press)
+if (new URLSearchParams(location.search).get('quick') === '1') {
+  setTimeout(maybeAutoOpenZoneFromGps, 500);
+}
+
+/* ===========================================================
+   PHOTO CAPTURE — compress client-side, attach to report
+   =========================================================== */
+let pendingPhoto = null; // { dataUrl, sizeKb, filename }
+
+document.getElementById('photo-btn').addEventListener('click', () => {
+  document.getElementById('photo-input').click();
+});
+
+document.getElementById('photo-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const compressed = await compressImage(file, 1024, 0.7);
+    pendingPhoto = compressed;
+    const preview = document.getElementById('photo-preview');
+    preview.src = compressed.dataUrl;
+    preview.classList.add('show');
+    document.getElementById('photo-meta').textContent = `${compressed.sizeKb}KB`;
+    document.getElementById('photo-clear').style.display = 'inline-block';
+  } catch (err) {
+    alert('Could not read photo: ' + err.message);
+  }
+});
+
+document.getElementById('photo-clear').addEventListener('click', () => {
+  pendingPhoto = null;
+  const preview = document.getElementById('photo-preview');
+  preview.src = '';
+  preview.classList.remove('show');
+  document.getElementById('photo-meta').textContent = '';
+  document.getElementById('photo-clear').style.display = 'none';
+  document.getElementById('photo-input').value = '';
+});
+
+function compressImage(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w > h && w > maxDim) { h = h * maxDim / w; w = maxDim; }
+        else if (h > maxDim) { w = w * maxDim / h; h = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const sizeKb = Math.round((dataUrl.length * 3 / 4) / 1024);
+        resolve({ dataUrl, sizeKb, filename: file.name || ('photo_' + Date.now() + '.jpg') });
+      };
+      img.onerror = () => reject(new Error('image decode failed'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('file read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Patch openReportModal: reset photo state every time
+const originalOpenModal = openReportModal;
+openReportModal = function(zone, latlng) {
+  originalOpenModal(zone, latlng);
+  pendingPhoto = null;
+  const preview = document.getElementById('photo-preview');
+  preview.src = '';
+  preview.classList.remove('show');
+  document.getElementById('photo-meta').textContent = '';
+  document.getElementById('photo-clear').style.display = 'none';
+  document.getElementById('photo-input').value = '';
+  // GPS hint update
+  if (lastGpsFix && (Date.now() - lastGpsFix.ts) < 5*60*1000) {
+    const near = nearestZone(lastGpsFix.lat, lastGpsFix.lng);
+    if (near.zone && near.distMeters < 800) showGpsHint(true, near.zone, near.distMeters);
+    else showGpsHint(false);
+  } else {
+    showGpsHint(false);
+  }
+};
+
+// Patch save handler to attach photo to the report payload
+const originalSaveBtn = document.getElementById('modal-save');
+const newSaveBtn = originalSaveBtn.cloneNode(true);
+originalSaveBtn.parentNode.replaceChild(newSaveBtn, originalSaveBtn);
+newSaveBtn.addEventListener('click', async () => {
+  if (!selectedLevel) { alert('Please choose a debris level (1–5).'); return; }
+  const now = new Date();
+  const latlng = Array.isArray(selectedLatLng) ? selectedLatLng : [selectedLatLng.lat, selectedLatLng.lng];
+
+  const observedInputRaw = document.getElementById('observed-at').value;
+  let observedDate = observedInputRaw ? new Date(observedInputRaw) : new Date();
+  if (isNaN(observedDate.getTime())) observedDate = new Date();
+  if (observedDate.getTime() > now.getTime()) observedDate = now;
+  const maxAgeMs = 48 * 60 * 60 * 1000;
+  if (now.getTime() - observedDate.getTime() > maxAgeMs) {
+    if (!confirm('That observation time is more than 48 hours ago — is that right?')) return;
+  }
+
+  const report = {
+    id: 'r_' + Math.random().toString(36).slice(2) + Date.now().toString(36),
+    zoneId: activeZone.id,
+    zoneName: activeZone.name,
+    level: selectedLevel,
+    type: document.getElementById('debris-type').value,
+    rower: document.getElementById('rower-name').value.trim(),
+    notes: document.getElementById('notes').value.trim(),
+    lat: latlng[0],
+    lng: latlng[1],
+    ts: observedDate.toISOString(),
+    reportedAt: now.toISOString(),
+    tideSnapshot: latestTideSnapshot(),
+    flowSnapshot: latestFlowSnapshot(),
+    // photo as data URL — Apps Script uploads to Drive and stores returned URL
+    photoData: pendingPhoto ? pendingPhoto.dataUrl : null,
+    photoFilename: pendingPhoto ? pendingPhoto.filename : null
+  };
+  reports.push(report);
+  saveReports(reports);
+  closeModal();
+  refreshAll();
+  if (getWebhookUrl()) pushReportToCloud(report);
+
+  // Try to register a background sync so a failed POST will retry when online
+  if ('serviceWorker' in navigator && 'SyncManager' in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.sync.register('flush-pending');
+    } catch(e) { /* not supported on iOS Safari, that's ok */ }
+  }
+});
+
+/* ===========================================================
+   NOTIFICATIONS — alert on new L4/L5 reports during sync
+   =========================================================== */
+const SEEN_IDS_KEY = 'passaic.seenIds.v1';
+function getSeenIds() { try { return new Set(JSON.parse(localStorage.getItem(SEEN_IDS_KEY)) || []); } catch(e) { return new Set(); } }
+function markSeen(ids) {
+  const s = getSeenIds();
+  ids.forEach(i => s.add(i));
+  // keep only the most recent ~500 to bound storage
+  const arr = [...s].slice(-500);
+  localStorage.setItem(SEEN_IDS_KEY, JSON.stringify(arr));
+}
+
+async function ensureNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  // Ask politely the first time the user opens the report modal — that's a meaningful gesture
+  try {
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  } catch (e) { return false; }
+}
+
+function notifyHighSeverity(newReports) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  newReports.filter(r => r.level >= 4).forEach(r => {
+    const title = `⚠ Level ${r.level} debris in ${r.zoneName}`;
+    const body = (r.rower ? `Reported by ${r.rower}. ` : '') + (r.notes || '');
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then(reg => reg.showNotification(title, {
+        body, icon: 'icon-192.png', badge: 'icon-192.png', tag: 'passaic-' + r.id
+      })).catch(() => new Notification(title, { body, icon: 'icon-192.png' }));
+    } else {
+      new Notification(title, { body, icon: 'icon-192.png' });
+    }
+  });
+}
+
+// Wrap pullReportsFromCloud to detect newly arrived high-severity reports
+const originalPull = pullReportsFromCloud;
+pullReportsFromCloud = async function() {
+  const seen = getSeenIds();
+  await originalPull();
+  const newOnes = reports.filter(r => !seen.has(r.id));
+  if (newOnes.length) notifyHighSeverity(newOnes);
+  markSeen(reports.map(r => r.id));
+};
+
+// Ask for notification permission the first time the user opens the modal
+let askedNotifPermission = false;
+const originalOpen2 = openReportModal;
+openReportModal = function(zone, latlng) {
+  originalOpen2(zone, latlng);
+  if (!askedNotifPermission) {
+    askedNotifPermission = true;
+    setTimeout(ensureNotificationPermission, 500);
+  }
+};
+</script>
+</body>
+</html>

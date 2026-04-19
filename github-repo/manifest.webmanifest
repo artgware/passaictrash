@@ -1,0 +1,40 @@
+{
+  "name": "Passaic River Debris Tracker",
+  "short_name": "Passaic Debris",
+  "description": "Rower-driven debris tracking on the lower Passaic River between Wallington and Kearny.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0e1621",
+  "theme_color": "#0f2540",
+  "categories": ["utilities", "navigation", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick Report",
+      "short_name": "Report",
+      "description": "Log a debris observation in your current zone",
+      "url": "/?quick=1"
+    }
+  ]
+}
